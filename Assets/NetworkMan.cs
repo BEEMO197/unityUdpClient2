@@ -5,16 +5,23 @@ using System;
 using System.Text;
 using System.Net.Sockets;
 using System.Net;
+using System.Linq;
+using UnityEngine.UIElements;
+using System.Drawing;
 
 public class NetworkMan : MonoBehaviour
 {
     public UdpClient udp;
     // Start is called before the first frame update
+    public GameState gameState;
     void Start()
     {
         udp = new UdpClient();
-        
-        udp.Connect("PUT_IP_ADDRESS_HERE",12345);
+
+        // 54.90.198.69 - Server Ip
+        // localhost - Local Ip
+
+        udp.Connect("localhost", 12345);
 
         Byte[] sendBytes = Encoding.ASCII.GetBytes("connect");
       
@@ -23,6 +30,7 @@ public class NetworkMan : MonoBehaviour
         udp.BeginReceive(new AsyncCallback(OnReceived), udp);
 
         InvokeRepeating("HeartBeat", 1, 1);
+
     }
 
     void OnDestroy(){
@@ -32,7 +40,8 @@ public class NetworkMan : MonoBehaviour
 
     public enum commands{
         NEW_CLIENT,
-        UPDATE
+        UPDATE,
+        LOST_CLIENT
     };
     
     [Serializable]
@@ -49,12 +58,20 @@ public class NetworkMan : MonoBehaviour
             public float B;
         }
         public string id;
-        public receivedColor color;        
+        public receivedColor color;
+        public bool init = true;
+        public GameObject cube = null;
     }
 
     [Serializable]
     public class NewPlayer{
-        
+        public Player newPlayer;
+    }
+
+    [Serializable]
+    public class DiePlayer
+    {
+        public Player lostPlayer;
     }
 
     [Serializable]
@@ -64,6 +81,13 @@ public class NetworkMan : MonoBehaviour
 
     public Message latestMessage;
     public GameState lastestGameState;
+    public NewPlayer lastestNewPlayer;
+    public DiePlayer lastestLostPlayer;
+
+    public List<Player> PlayerList;
+
+    public bool newPlayerSpawned = false;
+
     void OnReceived(IAsyncResult result){
         // this is what had been passed into BeginReceive as the second parameter:
         UdpClient socket = result.AsyncState as UdpClient;
@@ -82,9 +106,14 @@ public class NetworkMan : MonoBehaviour
         try{
             switch(latestMessage.cmd){
                 case commands.NEW_CLIENT:
+                    lastestNewPlayer = JsonUtility.FromJson<NewPlayer>(returnData);
+                    newPlayerSpawned = true;
                     break;
                 case commands.UPDATE:
                     lastestGameState = JsonUtility.FromJson<GameState>(returnData);
+                    break;
+                case commands.LOST_CLIENT:
+                    lastestLostPlayer = JsonUtility.FromJson<DiePlayer>(returnData);
                     break;
                 default:
                     Debug.Log("Error");
@@ -94,21 +123,49 @@ public class NetworkMan : MonoBehaviour
         catch (Exception e){
             Debug.Log(e.ToString());
         }
-        
+
         // schedule the next receive operation once reading is done:
         socket.BeginReceive(new AsyncCallback(OnReceived), socket);
     }
 
-    void SpawnPlayers(){
+    void SpawnPlayers()
+    {
+        if (newPlayerSpawned)
+        {
+            // Debug.Log(lastestNewPlayer.newPlayer.id);
+            PlayerList.Add(lastestNewPlayer.newPlayer);
+            PlayerList.Last().cube = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            PlayerList.Last().cube.AddComponent<PlayerCube>();
 
+            newPlayerSpawned = false;
+        }
     }
 
-    void UpdatePlayers(){
-
+    void UpdatePlayers()
+    {
+        for(int i = 0; i < lastestGameState.players.Length; i++)
+        {
+            for (int k = 0; k < PlayerList.Count(); k++)
+            {
+                if (lastestGameState.players[i].id == PlayerList[k].id)
+                {
+                    PlayerList[k].color = lastestGameState.players[i].color;
+                    PlayerList[k].cube.GetComponent<PlayerCube>().playerRef = PlayerList[k];
+                }
+            }
+        }
+        // Inside Player Cube Script
     }
 
-    void DestroyPlayers(){
-
+    void DestroyPlayers()
+    {
+        foreach(Player player in PlayerList)
+        {
+            if(player.id == lastestLostPlayer.lostPlayer.id)
+            {
+                PlayerList.Remove(player);
+            }
+        }
     }
     
     void HeartBeat(){
@@ -116,7 +173,8 @@ public class NetworkMan : MonoBehaviour
         udp.Send(sendBytes, sendBytes.Length);
     }
 
-    void Update(){
+    void Update()
+    {
         SpawnPlayers();
         UpdatePlayers();
         DestroyPlayers();
