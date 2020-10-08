@@ -29,7 +29,8 @@ public class NetworkMan : MonoBehaviour
 
         udp.BeginReceive(new AsyncCallback(OnReceived), udp);
 
-        InvokeRepeating("HeartBeat", 1, 1);
+        float repeatTime = 1.0f / 30.0f;
+        InvokeRepeating("HeartBeat", repeatTime, repeatTime);
 
     }
 
@@ -41,7 +42,8 @@ public class NetworkMan : MonoBehaviour
     public enum commands{
         NEW_CLIENT,
         UPDATE,
-        LOST_CLIENT
+        LOST_CLIENT, 
+        UNIQUE_CLIENT_ID
     };
     
     [Serializable]
@@ -57,8 +59,10 @@ public class NetworkMan : MonoBehaviour
             public float G;
             public float B;
         }
+
         public string id;
         public receivedColor color;
+        public Vector3 position;
         public bool init = true;
         public GameObject cube = null;
     }
@@ -79,6 +83,20 @@ public class NetworkMan : MonoBehaviour
         public Player[] players;
     }
 
+    public struct playerUniqueID
+    {
+        public string uniqueID;
+    }
+
+    playerUniqueID uniqueID;
+
+    public struct PlayerData
+    {
+        public Vector3 playerLocation;
+        public string heartbeat;
+    }
+
+    public PlayerData playerData;
     public Message latestMessage;
     public GameState lastestGameState;
     public NewPlayer lastestNewPlayer;
@@ -109,11 +127,17 @@ public class NetworkMan : MonoBehaviour
                     lastestNewPlayer = JsonUtility.FromJson<NewPlayer>(returnData);
                     newPlayerSpawned = true;
                     break;
+
                 case commands.UPDATE:
                     lastestGameState = JsonUtility.FromJson<GameState>(returnData);
                     break;
+
                 case commands.LOST_CLIENT:
                     lastestLostPlayer = JsonUtility.FromJson<DiePlayer>(returnData);
+                    break;
+
+                case commands.UNIQUE_CLIENT_ID:
+                    uniqueID = JsonUtility.FromJson<playerUniqueID>(returnData);
                     break;
                 default:
                     Debug.Log("Error");
@@ -151,6 +175,7 @@ public class NetworkMan : MonoBehaviour
                 {
                     PlayerList[k].color = lastestGameState.players[i].color;
                     PlayerList[k].cube.GetComponent<PlayerCube>().playerRef = PlayerList[k];
+                    PlayerList[k].cube.transform.position = lastestGameState.players[i].position;
                 }
             }
         }
@@ -167,9 +192,22 @@ public class NetworkMan : MonoBehaviour
             }
         }
     }
-    
-    void HeartBeat(){
-        Byte[] sendBytes = Encoding.ASCII.GetBytes("heartbeat");
+    void HeartBeat()
+    {
+        playerData.playerLocation = new Vector3(0.0f, 0.0f, 0.0f);
+
+        foreach(Player player in PlayerList)
+        {
+            if(player.id == uniqueID.uniqueID)
+            {
+                playerData.playerLocation = player.cube.transform.position;
+                continue;
+            }
+        }
+
+        playerData.heartbeat = "heartbeat";
+
+        Byte[] sendBytes = Encoding.ASCII.GetBytes(JsonUtility.ToJson(playerData));
         udp.Send(sendBytes, sendBytes.Length);
     }
 
